@@ -1,0 +1,104 @@
+from collections import defaultdict
+import pandas as pd
+import json
+import gzip
+import os
+import numpy
+
+modelA = os.path.join("modelA", os.listdir("modelA/")[0])
+modelB = os.path.join("modelB", os.listdir("modelB/")[0])
+
+assert modelA.endswith(".json.gz")
+assert modelB.endswith(".json.gz")
+
+def read_json_gz(fp):
+    return json.load(gzip.open(fp, "rt"))
+
+#get rid of all single CAG gene groups
+def make_list_genes(fp, min_group_size=2):
+    model = read_json_gz(fp)
+    list_of_sets = []
+    for list_of_genes in model.values():
+        if len(list_of_genes) >= min_group_size:
+            list_of_sets.append(set(list_of_genes))
+    return list_of_sets
+
+
+def make_indexed_list_of_genes(fp, min_group_size=2):
+    model = read_json_gz(fp)
+    # Store as a dictionary. Keys are gene names, values are sets of all genes in the CAG
+    indexed_list_of_sets = {}
+    for list_of_genes in model.values():
+        if len(list_of_genes) >= min_group_size:
+        
+            for gene_name in list_of_genes:
+             
+                indexed_list_of_sets[gene_name] = set(list_of_genes)
+    return indexed_list_of_sets
+
+
+def one_to_one(set_A,set_B):
+    
+    if set_B is None:
+        return 0
+    ov = set(set_A) & set(set_B)
+    length=len(ov)
+#     print("This is new one_to_one")
+    return length / len(set_A)
+
+
+function to compare set A to list of set B, returns max # of gene overlap
+def one_to_many(set_A, indexed_list_of_sets_B):
+    max_score=0
+    
+   
+    for gene_name in set_A:
+        score=one_to_one(set_A,indexed_list_of_sets_B.get(gene_name))
+        if score>max_score:
+            max_score=score
+    return max_score * len(set_A)
+
+#function to compare list of sets A to list of sets B
+def many_to_many(index_of_sets_A, index_of_sets_B):
+    
+    scores=[]
+    total_number_of_genes = []
+    
+    # Keep track of what genes have been already queried
+    already_queried_genes = set([])
+    
+    # Iterate over the list of genes in each CAG
+    for gene_list in index_of_sets_A.values():
+        if list(gene_list)[0] in already_queried_genes:
+            continue
+        scores.append(one_to_many(gene_list, index_of_sets_B))
+        total_number_of_genes.append(len(gene_list))
+        
+        already_queried_genes |= gene_list
+    return sum(scores)/sum(total_number_of_genes)
+
+
+# function to find number of genes in model 1
+def number_genes(model1):
+    total_genes=0
+    for cag in model1.values():
+        total_genes += len(cag)
+    return total_genes
+
+
+modelA_name = modelA.split("/")[-1].replace(".CAGs.json.gz", "")
+modelB_name = modelB.split("/")[-1].replace(".CAGs.json.gz", "")
+modelA = make_indexed_list_of_genes(modelA)
+modelB = make_indexed_list_of_genes(modelB)
+
+res = {
+    "Model A": modelA_name,
+    "Model B": modelB_name,
+    "Score": many_to_many(modelA,modelB),
+    "Number of CAGs in Model A":(len(modelA)),
+    "Number of Genes in Model A": number_genes(modelA)                    
+}
+
+print("Writing results for %s and %s to the cache" % (modelA_name, modelB_name))
+cache_fp = "%s.%s.json.gz" % (modelA_name, modelB_name)
+json.dump(res, gzip.open(cache_fp, "wt"))
